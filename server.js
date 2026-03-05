@@ -1,48 +1,76 @@
-const express = require('express');
-const { MongoClient } = require('mongodb');
-
-const app = express();
+const express = require("express");
+const mysql   = require("mysql2/promise");
+const app     = express();
 app.use(express.json());
 
-const MONGO_URI = process.env.MONGO_URI;
-const DB_NAME = "shoppingtime";
-const COLLECTION = "weights";
-const API_KEY = "e71c02db-857c-4147-a10c-1adf901f3e7d";
-
-let client;
-
-async function getDB() {
-  if (!client) {
-    client = new MongoClient(MONGO_URI);
-    await client.connect();
-    console.log("Connected to MongoDB!");
-  }
-  return client.db(DB_NAME);
-}
-
-app.get('/', (req, res) => {
-  res.json({ status: "ESP32 Bridge is running!" });
+const pool = mysql.createPool({
+  host:     process.env.MYSQLHOST     || "localhost",
+  port:     process.env.MYSQLPORT     || 3306,
+  user:     process.env.MYSQLUSER     || "root",
+  password: process.env.MYSQLPASSWORD || "",
+  database: process.env.MYSQLDATABASE || "shoppingtime",
+  waitForConnections: true,
+  connectionLimit: 10,
 });
 
-app.post('/app/data-/endpoint/data/v1/action/insertOne', async (req, res) => {
-  const key = req.headers['api-key'];
-  if (key !== API_KEY) {
+async function initDB() {
+  const conn = await pool.getConnection();
+  await conn.execute(`
+    CREATE TABLE IF NOT EXISTS weights (
+      id         INT AUTO_INCREMENT PRIMARY KEY,
+      weight     FLOAT       NOT NULL,
+      cart_id    VARCHAR(50) NOT NULL DEFAULT 'cart_001',
+      created_at TIMESTAMP   DEFAULT CURRENT_TIMESTAMP
+    )
+  `);
+  conn.release();
+  console.log("✅ Table 'weights' ready.");
+}
+
+// API key check
+const API_KEY = process.env.API_KEY || "my-secret-key";
+function auth(req, res, next) {
+  if (req.headers["api-key"] !== API_KEY)
     return res.status(401).json({ error: "Unauthorized" });
-  }
+  next();
+}
+
+// POST /weights  →  insert weight + cartId
+app.post("/weights", auth, async (req, res) => {
   try {
-    const { document } = req.body;
-    if (!document) return res.status(400).json({ error: "Missing document" });
-    document.serverTimestamp = new Date();
-    const db = await getDB();
-    const result = await db.collection(COLLECTION).insertOne(document);
-    console.log(`Weight saved: ${document.weight} kg`);
-    res.status(201).json({ insertedId: result.insertedId });
+    const { weight, cartId = "cart_001" } = req.body;
+    if (weight === undefined || weight === null)
+      return res.status(400).json({ error: "Missing 'weight' field" });
+
+    const [result] = await pool.execute(
+      "INSERT INTO weights (weight, cart_id) VALUES (?, ?)",
+      [weight, cartId]
+    );
+    console.log(`✅ weight=${weight} kg  cartId=${cartId}  id=${result.insertId}`);
+    res.status(201).json({ insertedId: result.insertId });
   } catch (err) {
-    console.error("Error:", err);
+    console.error("❌ DB error:", err.message);
     res.status(500).json({ error: err.message });
   }
 });
 
-// Use Railway's PORT environment variable
-const PORT = process.env.PORT || 8080;
-app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
+// GET /weights?limit=20
+app.get("/weights", auth, async (req, res) => {
+  try {
+    const limit = parseInt(req.query.limit) || 20;
+    const [rows] = await pool.execute(
+      "SELECT * FROM weights ORDER BY id DESC LIMIT ?", [limit]
+    );
+    res.json(rows);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get("/health", (_, res) => res.json({ status: "ok" }));
+
+const PORT = process.env.PORT || 3000;
+app.listen(PORT, async () => {
+  await initDB();
+  console.log(`🚀 Bridge running on port ${PORT}`);
+});
