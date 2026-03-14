@@ -1,4 +1,5 @@
 {
+<<<<<<< HEAD
   "name": "shopping-web-app",
   "private": true,
   "version": "0.0.0",
@@ -31,5 +32,16 @@
     "eslint-plugin-react-refresh": "^0.4.24",
     "globals": "^16.5.0",
     "vite": "^7.3.1"
+=======
+  "name": "esp32-mysql-bridge",
+  "version": "1.0.0",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "express": "^4.18.2",
+    "mysql2": "^3.6.0"
+>>>>>>> 8740a11c373b307b2360fc16c40ceea8ce5e43fa
   }
 }
